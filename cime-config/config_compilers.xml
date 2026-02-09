@@ -1,0 +1,231 @@
+<?xml version="1.0"?>
+
+<!-- ===================================================================== -->
+<!-- config_compilers.xml for container_intel                               -->
+<!--                                                                       -->
+<!-- CESM 2.1.5 / CIME 5.6  —  Intel oneAPI 2024.1  —  Rocky Linux 8      -->
+<!--                                                                       -->
+<!-- STRATEGY:                                                             -->
+<!--   CIME ships a comprehensive built-in "intel" compiler definition     -->
+<!--   with flag presets for FFLAGS, CFLAGS, CPPDEFS, FC_AUTO_R8,         -->
+<!--   FIXEDFLAGS, FREEFLAGS, DEBUG/OPT flags, OpenMP flags, etc.         -->
+<!--   (see cime/config/cesm/machines/config_compilers.xml).              -->
+<!--                                                                       -->
+<!--   The built-in "intel" definition assumes classic compilers           -->
+<!--   (icc/icpc/ifort). Our container uses Intel oneAPI 2024.1            -->
+<!--   LLVM-based compilers (icx/icpx/ifx), which are command-line        -->
+<!--   compatible with the classic compilers for nearly all flags.         -->
+<!--                                                                       -->
+<!--   We therefore:                                                       -->
+<!--     1. Keep COMPILER="intel" to inherit all flag presets              -->
+<!--     2. Override ONLY the executable names (SCC, SCXX, SFC)           -->
+<!--     3. Override MPI wrappers to match oneAPI conventions              -->
+<!--     4. Set library paths and linking flags                           -->
+<!--     5. Adjust CXX_LDFLAGS for LLVM-based icx/icpx                   -->
+<!--                                                                       -->
+<!--   This avoids duplicating ~100 lines of flags and ensures we get     -->
+<!--   bug fixes from upstream CIME "intel" defaults automatically.       -->
+<!-- ===================================================================== -->
+
+<config_compilers version="2.0">
+
+  <compiler COMPILER="intel" MACH="container_intel">
+
+    <!-- =============================================================== -->
+    <!-- SERIAL COMPILERS                                                -->
+    <!--                                                                 -->
+    <!-- Override the classic Intel names (icc/icpc/ifort) with the      -->
+    <!-- oneAPI LLVM-based equivalents.                                  -->
+    <!--                                                                 -->
+    <!--   SFC  — Serial Fortran compiler (replaces ifort)               -->
+    <!--          ifx is Intel's LLVM-based Fortran compiler.            -->
+    <!--          It accepts the same flags as ifort for CESM-relevant   -->
+    <!--          options (-fp-model, -convert, -assume, -ftz, etc.).    -->
+    <!--                                                                 -->
+    <!--   SCC  — Serial C compiler (replaces icc)                       -->
+    <!--          icx is Intel's LLVM-based C compiler (clang frontend). -->
+    <!--          It accepts classic Intel flags like -fp-model precise.  -->
+    <!--                                                                 -->
+    <!--   SCXX — Serial C++ compiler (replaces icpc)                    -->
+    <!--          icpx is Intel's LLVM-based C++ compiler.               -->
+    <!--                                                                 -->
+    <!-- These are used for non-MPI builds (mpi-serial) and for tools   -->
+    <!-- like cprnc, genf90, and mct's serial configure tests.          -->
+    <!-- =============================================================== -->
+    <SFC>ifx</SFC>
+    <SCC>icx</SCC>
+    <SCXX>icpx</SCXX>
+
+    <!-- =============================================================== -->
+    <!-- MPI COMPILER WRAPPERS                                           -->
+    <!--                                                                 -->
+    <!-- Intel MPI 2021.12 (part of oneAPI 2024.1) provides generic      -->
+    <!-- wrapper names: mpicc, mpicxx, mpifc.                            -->
+    <!--                                                                 -->
+    <!-- The underlying compiler is controlled by environment variables  -->
+    <!-- set in config_machines.xml:                                     -->
+    <!--   I_MPI_CC=icx   I_MPI_CXX=icpx   I_MPI_FC=ifx                -->
+    <!--                                                                 -->
+    <!-- Note: Classic Intel MPI had compiler-specific wrappers          -->
+    <!-- (mpiicc, mpiicpc, mpiifort). Those are DEPRECATED in oneAPI     -->
+    <!-- and removed in recent releases. The generic names + I_MPI_*     -->
+    <!-- environment variables are the supported approach.               -->
+    <!--                                                                 -->
+    <!--   MPIFC  — MPI Fortran wrapper: compiles CAM, CLM, POP, CICE,  -->
+    <!--            MOSART, RTM, and all component Fortran sources.      -->
+    <!--                                                                 -->
+    <!--   MPICC  — MPI C wrapper: compiles PIO's C layer, MCT's C      -->
+    <!--            configure tests, GPTL timing library, and various    -->
+    <!--            utilities.                                           -->
+    <!--                                                                 -->
+    <!--   MPICXX — MPI C++ wrapper: compiles CISM (Glimmer-CISM ice    -->
+    <!--            sheet model) and Trilinos solver components.         -->
+    <!-- =============================================================== -->
+    <MPIFC>mpifc</MPIFC>
+    <MPICC>mpicc</MPICC>
+    <MPICXX>mpicxx</MPICXX>
+
+    <!-- =============================================================== -->
+    <!-- CXX_LINKER                                                      -->
+    <!--                                                                 -->
+    <!-- Tells CIME which language driver to use for the final link      -->
+    <!-- step of components that contain both Fortran and C++ code.      -->
+    <!--                                                                 -->
+    <!-- FORTRAN: Use the Fortran compiler as the linker. This is the    -->
+    <!-- Intel convention — the Fortran driver automatically links       -->
+    <!-- the Intel Fortran runtime (libifcore, libifport, libimf).       -->
+    <!-- C++ runtime libraries are pulled in via CXX_LDFLAGS below.     -->
+    <!-- =============================================================== -->
+    <CXX_LINKER>FORTRAN</CXX_LINKER>
+
+    <!-- =============================================================== -->
+    <!-- CXX_LDFLAGS                                                     -->
+    <!--                                                                 -->
+    <!-- Flags passed to the linker when C++ objects are present.        -->
+    <!--                                                                 -->
+    <!-- The classic Intel flag was -cxxlib, which told ifort to link    -->
+    <!-- against the Intel C++ runtime. For oneAPI's ifx (LLVM-based),  -->
+    <!-- -cxxlib is still accepted and links the LLVM C++ standard      -->
+    <!-- library (libc++) or the GCC C++ library (libstdc++).           -->
+    <!--                                                                 -->
+    <!-- We keep -cxxlib for compatibility. If MCT or PIO linking       -->
+    <!-- fails with C↔Fortran errors, try changing to:                  -->
+    <!--   -lstdc++                                                      -->
+    <!-- or remove this flag entirely and add -lstdc++ to SLIBS.        -->
+    <!-- =============================================================== -->
+    <CXX_LDFLAGS>-cxxlib</CXX_LDFLAGS>
+
+    <!-- =============================================================== -->
+    <!-- SUPPORTS_CXX                                                    -->
+    <!--                                                                 -->
+    <!-- TRUE enables building C++ components (primarily CISM).          -->
+    <!-- Set to TRUE because icpx fully supports C++17.                  -->
+    <!-- If your compset does not include CISM, this has no effect.     -->
+    <!-- =============================================================== -->
+    <SUPPORTS_CXX>TRUE</SUPPORTS_CXX>
+
+    <!-- =============================================================== -->
+    <!-- HAS_F2008_CONTIGUOUS                                            -->
+    <!--                                                                 -->
+    <!-- TRUE tells PIO and other components that the Fortran compiler   -->
+    <!-- supports the F2008 CONTIGUOUS attribute for assumed-shape       -->
+    <!-- arrays. This enables more efficient array passing to C code.   -->
+    <!--                                                                 -->
+    <!-- ifx (oneAPI 2024.1) fully supports F2008 and F2018 features,  -->
+    <!-- including CONTIGUOUS.                                           -->
+    <!-- =============================================================== -->
+    <HAS_F2008_CONTIGUOUS>TRUE</HAS_F2008_CONTIGUOUS>
+
+    <!-- =============================================================== -->
+    <!-- NETCDF_PATH / PNETCDF_PATH / HDF5_PATH                         -->
+    <!--                                                                 -->
+    <!-- Root prefixes for NetCDF, Parallel-NetCDF, and HDF5.           -->
+    <!--                                                                 -->
+    <!-- CIME's Makefile constructs:                                     -->
+    <!--   -I$(NETCDF_PATH)/include   -L$(NETCDF_PATH)/lib              -->
+    <!--   -I$(PNETCDF_PATH)/include  -L$(PNETCDF_PATH)/lib             -->
+    <!--                                                                 -->
+    <!-- All three are installed under /opt/cesm-deps in our container  -->
+    <!-- (headers in /opt/cesm-deps/include, libs in /opt/cesm-deps/lib).-->
+    <!--                                                                 -->
+    <!-- These are also set as environment variables in                  -->
+    <!-- config_machines.xml, but compiler-level settings here are      -->
+    <!-- what CIME's build scripts actually consume for -I/-L paths.    -->
+    <!-- =============================================================== -->
+    <NETCDF_PATH>/opt/cesm-deps</NETCDF_PATH>
+    <PNETCDF_PATH>/opt/cesm-deps</PNETCDF_PATH>
+    <HDF5_PATH>/opt/cesm-deps</HDF5_PATH>
+
+    <!-- =============================================================== -->
+    <!-- SLIBS — System libraries for linking                            -->
+    <!--                                                                 -->
+    <!-- These flags are appended to every component's link line.        -->
+    <!-- The order matters: libraries must come after the objects that   -->
+    <!-- reference them (standard Unix linker convention).               -->
+    <!--                                                                 -->
+    <!-- Library breakdown:                                              -->
+    <!--                                                                 -->
+    <!--   -lnetcdff    NetCDF-Fortran library (nf90_* interfaces)      -->
+    <!--                Used by every CESM component for I/O.           -->
+    <!--                                                                 -->
+    <!--   -lnetcdf     NetCDF-C library (nc_* interfaces)              -->
+    <!--                Backend for NetCDF-Fortran; also used directly   -->
+    <!--                by PIO's C layer.                                -->
+    <!--                                                                 -->
+    <!--   -lpnetcdf    Parallel-NetCDF (CDF-5 parallel I/O)            -->
+    <!--                Used by PIO as an alternative I/O backend.      -->
+    <!--                Required even if PIO_TYPENAME=netcdf, because   -->
+    <!--                PIO is built with PnetCDF support compiled in.  -->
+    <!--                                                                 -->
+    <!--   -lhdf5_hl    HDF5 High-Level API (dimension scales, etc.)   -->
+    <!--   -lhdf5       HDF5 core library                              -->
+    <!--                NetCDF-4 format is built on HDF5, so these are  -->
+    <!--                required transitive dependencies.               -->
+    <!--                                                                 -->
+    <!--   -lz          zlib (DEFLATE compression)                      -->
+    <!--                Required by HDF5 for compressed datasets.       -->
+    <!--                                                                 -->
+    <!--   -lcurl       libcurl (HTTP client)                           -->
+    <!--                Required by NetCDF-C for OPeNDAP remote access  -->
+    <!--                support (compiled in by default).               -->
+    <!--                                                                 -->
+    <!--   -ldl         Dynamic linker library                          -->
+    <!--                Required by HDF5 for plugin support.            -->
+    <!--                                                                 -->
+    <!--   -lm          Math library (libm)                             -->
+    <!--                Provides sin/cos/exp/log used throughout CESM.  -->
+    <!--                                                                 -->
+    <!-- MKL (Intel Math Kernel Library) for impi:                      -->
+    <!--   -mkl=cluster enables the cluster-parallel MKL (ScaLAPACK,   -->
+    <!--   BLACS) along with threaded BLAS/LAPACK. This shorthand flag  -->
+    <!--   is accepted by both classic Intel and oneAPI compilers and   -->
+    <!--   automatically resolves to the correct link group.            -->
+    <!--   Used by POP's barotropic solver and CICE's EVP dynamics.    -->
+    <!-- =============================================================== -->
+    <SLIBS>
+      <base> -L/opt/cesm-deps/lib -lnetcdff -lnetcdf -lpnetcdf -lhdf5_hl -lhdf5 -lz -lcurl -ldl -lm -lifcore -lifport </base>
+      <append MPILIB="impi"> -qmkl=cluster</append>
+    </SLIBS>
+
+    <!-- =============================================================== -->
+    <!-- PIO_FILESYSTEM_HINTS                                            -->
+    <!--                                                                 -->
+    <!-- Tells PIO which filesystem optimizations to enable.            -->
+    <!--                                                                 -->
+    <!-- Options: gpfs, lustre, or leave empty for generic.             -->
+    <!--                                                                 -->
+    <!-- Most HPC scratch filesystems are Lustre, so "lustre" is a     -->
+    <!-- reasonable default. PIO will use Lustre-specific MPI-IO hints  -->
+    <!-- (striping alignment, collective buffering) for better          -->
+    <!-- parallel I/O performance.                                      -->
+    <!--                                                                 -->
+    <!-- For local Docker testing on ext4/overlay, this hint is ignored -->
+    <!-- gracefully — PIO falls back to generic MPI-IO.                -->
+    <!-- Override per-case if your HPC uses GPFS:                      -->
+    <!--   ./xmlchange PIO_FILESYSTEM_HINTS=gpfs                       -->
+    <!-- =============================================================== -->
+    <PIO_FILESYSTEM_HINTS>lustre</PIO_FILESYSTEM_HINTS>
+
+  </compiler>
+
+</config_compilers>

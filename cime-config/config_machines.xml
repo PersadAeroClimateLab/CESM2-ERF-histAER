@@ -1,0 +1,155 @@
+<?xml version="1.0"?>
+<config_machines version="2.0">
+  <machine MACH="container_intel">
+
+    <!-- ================================================================= -->
+    <!-- Machine description                                               -->
+    <!-- ================================================================= -->
+    <DESC>
+      Containerized CESM 2.1.5 environment with Intel oneAPI 2024.1
+      compilers (icx/icpx/ifx) and Intel MPI 2021.12 on Rocky Linux 8.
+      Designed for build inside Docker/Apptainer, submit via host SLURM.
+    </DESC>
+
+    <!-- ================================================================= -->
+    <!-- OS: Passed to CPP defines as -DLINUX                              -->
+    <!-- Recognized values: LINUX, AIX, Darwin, CNL                        -->
+    <!-- ================================================================= -->
+    <OS>LINUX</OS>
+
+    <!-- ================================================================= -->
+    <!-- COMPILERS: Comma-separated list, first is default.                -->
+    <!-- Must match a COMPILER entry in config_compilers.xml.              -->
+    <!-- We use "intel" because CESM 2.1.5's CIME has built-in            -->
+    <!-- compiler flag presets for the "intel" compiler name.              -->
+    <!-- ================================================================= -->
+    <COMPILERS>intel</COMPILERS>
+
+    <!-- ================================================================= -->
+    <!-- MPILIBS: MPI libraries available, first is default.               -->
+    <!-- "impi" matches CIME's built-in Intel MPI presets and              -->
+    <!-- triggers correct mpirun arguments and I_MPI_* handling.           -->
+    <!-- mpi-serial is implicitly available and need not be listed.        -->
+    <!-- ================================================================= -->
+    <MPILIBS>impi</MPILIBS>
+
+    <!-- ================================================================= -->
+    <!-- CIME_OUTPUT_ROOT: Base directory for case build and run output.   -->
+    <!-- $CASE/bld and $CASE/run are created below this path.             -->
+    <!-- Uses $USER to keep output per-user when image is shared.         -->
+    <!-- In Apptainer, /scratch is bind-mounted from the host.            -->
+    <!-- ================================================================= -->
+    <CIME_OUTPUT_ROOT>/scratch/$USER/cesm-output</CIME_OUTPUT_ROOT>
+
+    <!-- ================================================================= -->
+    <!-- DIN_LOC_ROOT: Root of CESM input data.                            -->
+    <!-- Bind-mounted from host filesystem. Shared across users.          -->
+    <!-- CESM downloads missing data here automatically via wget/curl.    -->
+    <!-- ================================================================= -->
+    <DIN_LOC_ROOT>/inputdata</DIN_LOC_ROOT>
+
+    <!-- ================================================================= -->
+    <!-- DIN_LOC_ROOT_CLMFORC: CLM atmospheric forcing data location.      -->
+    <!-- Subset of DIN_LOC_ROOT used by DATM for CLM-forced runs.         -->
+    <!-- FHIST_BGC uses CAM (not DATM), so this is rarely accessed        -->
+    <!-- for our primary compset, but must be defined for other compsets.  -->
+    <!-- ================================================================= -->
+    <DIN_LOC_ROOT_CLMFORC>/inputdata/atm/datm7</DIN_LOC_ROOT_CLMFORC>
+
+    <!-- ================================================================= -->
+    <!-- DOUT_S_ROOT: Short-term archive root.                             -->
+    <!-- After each run segment, history/restart files are moved here     -->
+    <!-- from the run directory. Keeps run directory clean.               -->
+    <!-- ================================================================= -->
+    <DOUT_S_ROOT>/scratch/$USER/cesm-archive/$CASE</DOUT_S_ROOT>
+
+    <!-- ================================================================= -->
+    <!-- BASELINE_ROOT: Directory for regression test baselines.           -->
+    <!-- Not critical for production but required by schema.              -->
+    <!-- ================================================================= -->
+    <BASELINE_ROOT>/scratch/$USER/cesm-baselines</BASELINE_ROOT>
+
+    <!-- ================================================================= -->
+    <!-- CCSM_CPRNC: Path to the cprnc comparison tool.                    -->
+    <!-- Used by CESM test infrastructure to compare NetCDF history       -->
+    <!-- files between test runs. Must be built separately.               -->
+    <!-- Set to empty initially; built during first case.build or         -->
+    <!-- manually. CIME will warn but not fail without it.                -->
+    <!-- ================================================================= -->
+    <CCSM_CPRNC>/opt/cesm-deps/bin/cprnc</CCSM_CPRNC>
+
+    <!-- ================================================================= -->
+    <!-- GMAKE / GMAKE_J: GNU Make executable and parallelism.             -->
+    <!-- CESM's build generates Makefiles and invokes gmake.              -->
+    <!-- J=4 is conservative for Docker on a laptop.                      -->
+    <!-- Override per-case with: ./xmlchange GMAKE_J=8                    -->
+    <!-- ================================================================= -->
+    <GMAKE>make</GMAKE>
+    <GMAKE_J>4</GMAKE_J>
+
+    <!-- ================================================================= -->
+    <!-- BATCH_SYSTEM: Batch scheduler type.                               -->
+    <!-- "none" means CIME will not generate batch scripts or call        -->
+    <!-- sbatch/qsub. This is correct for the container because:         -->
+    <!--   - case.build runs interactively inside the container           -->
+    <!--   - case.submit -no-batch runs directly for local testing       -->
+    <!--   - For HPC submission, the host calls sbatch on a wrapper       -->
+    <!--     script that invokes apptainer exec, so SLURM lives          -->
+    <!--     outside the container entirely                               -->
+    <!-- ================================================================= -->
+    <BATCH_SYSTEM>none</BATCH_SYSTEM>
+
+    <!-- ================================================================= -->
+    <!-- SUPPORTED_BY: Contact info, not used by code.                     -->
+    <!-- ================================================================= -->
+    <SUPPORTED_BY>container-maintainer</SUPPORTED_BY>
+
+    <!-- ================================================================= -->
+    <!-- MAX_TASKS_PER_NODE: Total hardware threads per node.              -->
+    <!-- MAX_MPITASKS_PER_NODE: Max MPI ranks per node.                    -->
+    <!-- These control PE layout defaults in env_mach_pes.xml.            -->
+    <!--                                                                   -->
+    <!-- For local Docker testing, use the container's available cores.   -->
+    <!-- For Apptainer on HPC, override per-case with xmlchange.          -->
+    <!-- Setting to a reasonable default that works for both contexts.    -->
+    <!-- ================================================================= -->
+    <MAX_TASKS_PER_NODE>8</MAX_TASKS_PER_NODE>
+    <MAX_MPITASKS_PER_NODE>8</MAX_MPITASKS_PER_NODE>
+
+    <!-- ================================================================= -->
+    <!-- Set PROJECT_REQUIRED to FALSE so CIME does not error              -->
+    <!-- when no allocation account is provided.                           -->
+    <!-- ================================================================= -->
+    <PROJECT_REQUIRED>FALSE</PROJECT_REQUIRED>
+
+    <!-- ================================================================= -->
+    <!-- mpirun: Defines how CIME launches MPI executables.                -->
+    <!--                                                                   -->
+    <!-- For Intel MPI (impi):                                             -->
+    <!--   Uses mpirun with -np for task count.                           -->
+    <!--   The {{ total_tasks }} and {{ thread_count }} are Jinja2        -->
+    <!--   templates that CIME resolves from env_mach_pes.xml at          -->
+    <!--   submit/run time.                                                -->
+    <!--                                                                   -->
+    <!-- For mpi-serial:                                                   -->
+    <!--   Empty executable — CESM runs as a single process.              -->
+    <!--   Used for debugging and single-processor testing.               -->
+    <!-- ================================================================= -->
+    <mpirun mpilib="impi">
+      <executable>mpirun</executable>
+      <arguments>
+        <arg name="num_tasks"> -np {{ total_tasks }}</arg>
+      </arguments>
+    </mpirun>
+    <!-- ================================================================= -->
+    <!-- module_system: Set to "none" because the container has no         -->
+    <!-- module system — all compilers and libraries are on PATH           -->
+    <!-- via Docker ENV directives baked into the image.                   -->
+    <!--                                                                   -->
+    <!-- On HPC systems, CIME uses module load/swap commands here.        -->
+    <!-- In a container, the environment is fixed at image build time,    -->
+    <!-- so no module operations are needed or possible.                   -->
+    <!-- ================================================================= -->
+    <module_system type="none"/>
+  </machine>
+</config_machines>
