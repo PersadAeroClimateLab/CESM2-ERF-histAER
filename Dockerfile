@@ -17,13 +17,11 @@ RUN yum install -y yum-utils && \
       ucx-ib \
       ucx-rdmacm \
       ucx-devel \
-    && yum clean all
-
-RUN yum install -y \
       gcc-toolset-15-libstdc++-devel g++ \
       libxml2 libxml2-devel \
       libgfortran \
       libibmad-devel libibumad \
+    #   gcc gfortran \
       libquadmath libquadmath-devel \
       make findutils emacs byacc ca-certificates \
       ncurses-devel file zlib python3 xz which wget \
@@ -54,6 +52,16 @@ ENV PATH=/usr/lib64:$AOCC_PATH/bin:$AOCC_PATH/share/opt-viewer:$PATH \
     CPLUS_INCLUDE_PATH=$AOCC_PATH/include \
     CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH:$AOCC_PATH/include
 
+WORKDIR /opt/cesm-deps
+
+ENV CESM_DEP_PREFIX=/opt/cesm-deps
+ENV PATH=${CESM_DEP_PREFIX}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CESM_DEP_PREFIX}/lib:${LD_LIBRARY_PATH}
+ENV LIBRARY_PATH=${CESM_DEP_PREFIX}/lib:${LIBRARY_PATH}
+ENV CPATH=${CESM_DEP_PREFIX}/include:${CPATH}
+ENV PKG_CONFIG_PATH=${CESM_DEP_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}
+ENV CMAKE_PREFIX_PATH=${CESM_DEP_PREFIX}:${CMAKE_PREFIX_PATH}
+
 COPY simple_compiler_tests/* /tmp/
 
 RUN cd /tmp && \
@@ -71,13 +79,21 @@ RUN cd /tmp && \
     gzip -dc mvapich2-2.3.7.tar.gz | tar -x && \
     cd mvapich2-2.3.7 && \
     CC=clang CXX=clang++ FC=flang F77=flang ./configure \
-        --with-device=ch3:mrail \
-        --with-rdma=gen2 \
-        --enable-fortran=yes \
+        --prefix=/usr/local \
         --with-ch3-rank-bits=32 \
+        --enable-fortran=yes \
         --enable-cxx=yes \
         --enable-romio \
-        --enable-fast=O3 && \
+        --disable-static \
+        --enable-shared \
+        --enable-hybrid \
+        --enable-g=dbg \
+        --enable-threads=multiple \
+        CFLAGS="-pipe -g -O2 -fno-strict-aliasing" \
+        CXXFLAGS="-pipe -g -O2 -fno-strict-aliasing" \
+        FCFLAGS="-g -O2" \
+        FFLAGS="-pipe -w -g -O2" \
+        && \
     make -j$(nproc) && \
     make install && \
     cd / && rm -r /tmp/mvapich2-2.3.7
@@ -86,10 +102,14 @@ ENV CC=mpicc \
     CXX=mpicxx \
     FC=mpifort \
     F77=mpifort \
-    CFLAGS="-O3 -march=znver3 -flto -fPIC" \
-    CXXFLAGS="-O3 -march=znver3 -flto -fPIC" \
-    FFLAGS="-O3 -march=znver3 -flto -fPIC" \
-    LDFLAGS="-flto -fPIC"
+    MPICH_CC=clang \
+    MPICH_CXX=clang++ \
+    MPICH_FC=flang \
+    MPICH_F77=flang \
+    CFLAGS="-O2 -march=znver3 -fPIC" \
+    CXXFLAGS="-O2 -march=znver3 -fPIC" \
+    FFLAGS="-O2 -march=znver3 -fPIC" \
+    LDFLAGS=""
 
 RUN yum update -y && yum install --nogpgcheck -y \
     procps \
@@ -139,22 +159,6 @@ RUN cd /tmp && \
     cmake --version | grep -q "3.27.9" && \
     cd / && rm -rf /tmp/cmake*
 
-# # Double check that the initial build environment is configured correctly
-# COPY check_build.sh .
-# RUN source check_build.sh
-
-# # CESM dependencies installed separately
-ENV CESM_DEP_PREFIX=/opt/cesm-deps
-
-# # Add to paths
-ENV PATH=${CESM_DEP_PREFIX}/bin:${PATH}
-ENV LD_LIBRARY_PATH=${CESM_DEP_PREFIX}/lib:${LD_LIBRARY_PATH}
-ENV LIBRARY_PATH=${CESM_DEP_PREFIX}/lib:${LIBRARY_PATH}
-ENV CPATH=${CESM_DEP_PREFIX}/include:${CPATH}
-ENV PKG_CONFIG_PATH=${CESM_DEP_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH}
-ENV CMAKE_PREFIX_PATH=${CESM_DEP_PREFIX}:${CMAKE_PREFIX_PATH}
-
-
 # ---------------------------------------------------------------------------
 # zlib 1.3.1
 # ---------------------------------------------------------------------------
@@ -182,6 +186,27 @@ RUN cd /tmp && \
         --enable-static && \
     make -j$(nproc) && \
     make install
+
+# ---------------------------------------------------------------------------
+# AOCL 5.2 - BLAS, LAPCK, M
+# ---------------------------------------------------------------------------  
+RUN cd /tmp && \
+    git clone https://github.com/amd/aocl.git --branch AOCL-5.2 && \
+    cd aocl && \
+     cmake \ 
+        -S . \
+        -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DENABLE_ILP64=OFF \
+        -DENABLE_AOCL_BLAS=ON \
+        -DENABLE_AOCL_UTILS=ON \
+        -DENABLE_AOCL_LAPACK=ON \
+        -DENABLE_AOCL_LIBM=ON \
+        -DENABLE_MULTITHREADING=OFF \
+        -DCMAKE_INSTALL_PREFIX=${CESM_DEP_PREFIX} && \
+    cmake --build build --config release --target install && \
+    cd / && rm -rf /tmp/aocl
 
 # ---------------------------------------------------------------------------
 # HDF5 1.14.6
